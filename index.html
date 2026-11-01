@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECHO – Incident Rescue Command Dashboard</title>
+    <!-- Leaflet CSS & JS for OpenStreetMap mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --surface: #1e293b;
+            --surface-elevated: #334155;
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+            --critical: #ef4444;
+            --high: #f97316;
+            --medium: #eab308;
+            --low: #22c55e;
+            --accent: #38bdf8;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge-live {
+            background-color: var(--critical);
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 65px);
+        }
+
+        .sidebar {
+            width: 440px;
+            background-color: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-bar {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn.active {
+            background: var(--accent);
+            color: var(--bg-dark);
+            font-weight: bold;
+        }
+
+        .alert-feed {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .alert-card {
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            cursor: pointer;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+
+        .alert-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+        }
+
+        .alert-card.critical { border-left: 5px solid var(--critical); }
+        .alert-card.high { border-left: 5px solid var(--high); }
+        .alert-card.medium { border-left: 5px solid var(--medium); }
+        .alert-card.low { border-left: 5px solid var(--low); }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .priority-badge {
+            font-size: 11px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #000;
+        }
+
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-group">
+            <h2 style="margin:0; font-weight:800; letter-spacing:1px; color:#fff;">ECHO</h2>
+            <span class="badge-live">Gateway Incident Center</span>
+        </div>
+        <div style="font-size: 13px; color: var(--text-muted);">
+            Cloud Gateway Status: <strong style="color:var(--low);">ONLINE</strong> &bull; Mesh Ingestion Active
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="filter-bar">
+                <button class="filter-btn active" onclick="filterAlerts('ALL')">All</button>
+                <button class="filter-btn" onclick="filterAlerts('CRITICAL')">Critical</button>
+                <button class="filter-btn" onclick="filterAlerts('HIGH')">High</button>
+                <button class="filter-btn" onclick="filterAlerts('TRAPPED')">Trapped</button>
+                <button class="filter-btn" onclick="filterAlerts('INJURED')">Injured</button>
+            </div>
+            <div class="alert-feed" id="alertList">
+                <!-- SOS Cards dynamically injected -->
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize OpenStreetMap via Leaflet
+        const map = L.map('map').setView([28.6139, 77.2090], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors | ECHO Rescue System'
+        }).addTo(map);
+
+        // Emergency dataset
+        const alertsData = [
+            { id: "SOS-9812", category: "Trapped under Debris", priority: "CRITICAL", lat: 28.6145, lon: 77.2085, people: 4, battery: 28, hops: 2, reports: 3, time: "2 mins ago" },
+            { id: "SOS-7431", category: "Injured - Heavy Bleeding", priority: "CRITICAL", lat: 28.6192, lon: 77.2140, people: 1, battery: 45, hops: 1, reports: 2, time: "8 mins ago" },
+            { id: "SOS-5520", category: "Medical Emergency - Asthma", priority: "HIGH", lat: 28.6080, lon: 77.2010, people: 2, battery: 67, hops: 3, reports: 1, time: "15 mins ago" },
+            { id: "SOS-3104", category: "Need Food & Clean Water", priority: "MEDIUM", lat: 28.6250, lon: 77.2190, people: 6, battery: 80, hops: 1, reports: 1, time: "22 mins ago" },
+            { id: "SOS-1099", category: "Safe - Family Evacuated", priority: "LOW", lat: 28.6010, lon: 77.1950, people: 3, battery: 92, hops: 0, reports: 1, time: "30 mins ago" }
+        ];
+
+        const markers = [];
+
+        function renderAlerts(filter = 'ALL') {
+            const container = document.getElementById('alertList');
+            container.innerHTML = '';
+
+            // Clear old markers
+            markers.forEach(m => map.removeLayer(m));
+            markers.length = 0;
+
+            alertsData.forEach(alert => {
+                if (filter !== 'ALL' && alert.priority !== filter && !alert.category.toUpperCase().includes(filter)) {
+                    return;
+                }
+
+                // Create Card
+                const card = document.createElement('div');
+                card.className = `alert-card ${alert.priority.toLowerCase()}`;
+                card.onclick = () => {
+                    map.flyTo([alert.lat, alert.lon], 16);
+                };
+
+                const color = alert.priority === 'CRITICAL' ? 'var(--critical)' :
+                              alert.priority === 'HIGH' ? 'var(--high)' :
+                              alert.priority === 'MEDIUM' ? 'var(--medium)' : 'var(--low)';
+
+                card.innerHTML = `
+                    <div class="card-header">
+                        <span style="font-weight:bold; font-size:14px;">${alert.category}</span>
+                        <span class="priority-badge" style="background:${color};">${alert.priority}</span>
+                    </div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom: 6px;">
+                        ID: ${alert.id} &bull; ${alert.time} &bull; Relayed: ${alert.hops} hops
+                    </div>
+                    <div style="font-size:12px; color:var(--text-primary);">
+                        Affected People: <strong>${alert.people}</strong> &bull; Battery: <strong>${alert.battery}%</strong> &bull; Corroboration: <strong>${alert.reports} source(s)</strong>
+                    </div>
+                    <div style="font-size:11px; color:var(--accent); margin-top:6px;">
+                        Location: ${alert.lat.toFixed(4)}, ${alert.lon.toFixed(4)} (Tap to focus map)
+                    </div>
+                `;
+                container.appendChild(card);
+
+                // Add Map Marker
+                const marker = L.circleMarker([alert.lat, alert.lon], {
+                    color: alert.priority === 'CRITICAL' ? '#ef4444' : '#f97316',
+                    fillColor: alert.priority === 'CRITICAL' ? '#ef4444' : '#f97316',
+                    fillOpacity: 0.8,
+                    radius: 9
+                }).addTo(map);
+
+                marker.bindPopup(`
+                    <div style="color:#000;">
+                        <strong>${alert.category}</strong><br>
+                        Priority: ${alert.priority}<br>
+                        People: ${alert.people} | Battery: ${alert.battery}%<br>
+                        Hops: ${alert.hops}
+                    </div>
+                `);
+
+                markers.push(marker);
+            });
+        }
+
+        function filterAlerts(category) {
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            renderAlerts(category);
+        }
+
+        renderAlerts('ALL');
+    </script>
+</body>
+</html>
+
